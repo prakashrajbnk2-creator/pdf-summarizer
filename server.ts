@@ -9,10 +9,11 @@ import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
 import mammoth from 'mammoth';
 import { jsPDF } from 'jspdf';
 
-// ✅ FIX: Proper pdf-parse import
+// ✅ FIXED pdf-parse import
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+const pdfParseModule = require('pdf-parse');
+const pdfParse = pdfParseModule.default || pdfParseModule;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
