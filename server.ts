@@ -9,11 +9,13 @@ import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
 import mammoth from 'mammoth';
 import { jsPDF } from 'jspdf';
 
+// ✅ FIX: Proper pdf-parse import
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// ✅ SAFE pdf-parse setup
-let pdfParse: any;
 
 // In-memory storage
 const users: any[] = [];
@@ -34,9 +36,6 @@ const summariesHistory: any[] = [];
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
-  // ✅ dynamic import (fixes crash)
-  pdfParse = (await import('pdf-parse')).default;
 
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -73,10 +72,10 @@ async function startServer() {
       const { email, password } = req.body;
 
       const user = users.find(u => u.email === email);
-      if (!user) return res.status(401).json({ error: 'Invalid' });
+      if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
       const match = await bcrypt.compare(password, user.password);
-      if (!match) return res.status(401).json({ error: 'Invalid' });
+      if (!match) return res.status(401).json({ error: 'Invalid credentials' });
 
       loginHistory.unshift({
         email,
@@ -100,7 +99,7 @@ async function startServer() {
 
   app.post('/api/extract', upload.single('file'), async (req, res) => {
     try {
-      if (!req.file) return res.status(400).json({ error: 'No file' });
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
       let text = '';
 
@@ -110,18 +109,18 @@ async function startServer() {
       } else if (req.file.mimetype === 'text/plain') {
         text = req.file.buffer.toString('utf8');
       } else {
-        return res.status(400).json({ error: 'Unsupported file' });
+        return res.status(400).json({ error: 'Unsupported file type' });
       }
 
       if (!text.trim()) {
-        return res.status(400).json({ error: 'Empty file' });
+        return res.status(400).json({ error: 'Empty or unreadable file' });
       }
 
       res.json({ text });
 
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Processing failed' });
+    } catch (err: any) {
+      console.error("FULL ERROR:", err);
+      res.status(500).json({ error: err.message || 'Processing failed' });
     }
   });
 
@@ -143,9 +142,11 @@ async function startServer() {
       const buffer = await Packer.toBuffer(doc);
 
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', 'attachment; filename=converted.docx');
       res.send(buffer);
 
-    } catch {
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Conversion failed' });
     }
   });
@@ -158,33 +159,48 @@ async function startServer() {
       const text = result.value;
 
       const doc = new jsPDF();
-      doc.text(text, 10, 10);
+      const splitText = doc.splitTextToSize(text, 180);
+      doc.text(splitText, 10, 10);
 
-      res.send(Buffer.from(doc.output('arraybuffer')));
-    } catch {
+      const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename=converted.pdf');
+      res.send(pdfBuffer);
+
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Conversion failed' });
     }
   });
 
-  // ---------------- MERGE ----------------
+  // ---------------- MERGE PDFs ----------------
 
   app.post('/api/merge-pdfs', upload.array('files'), async (req, res) => {
     try {
       const merged = await PDFDocument.create();
 
       for (const file of req.files as Express.Multer.File[]) {
+        if (file.mimetype !== 'application/pdf') continue;
+
         const pdf = await PDFDocument.load(file.buffer);
         const pages = await merged.copyPages(pdf, pdf.getPageIndices());
         pages.forEach(p => merged.addPage(p));
       }
 
       const bytes = await merged.save();
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename=merged.pdf');
       res.send(Buffer.from(bytes));
 
-    } catch {
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Merge failed' });
     }
   });
+
+  // ---------------- HEALTH ----------------
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
@@ -207,7 +223,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
