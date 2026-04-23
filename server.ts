@@ -9,7 +9,7 @@ import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
 import mammoth from 'mammoth';
 import { jsPDF } from 'jspdf';
 
-// ✅ FIXED pdfjs import (100% working)
+// ✅ FIXED pdfjs import
 import pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
 
 // ✅ Worker setup (safe)
@@ -108,7 +108,10 @@ async function startServer() {
       let text = '';
 
       if (req.file.mimetype === 'application/pdf') {
-        const loadingTask = pdfjsLib.getDocument({ data: req.file.buffer });
+        const loadingTask = pdfjsLib.getDocument({
+          data: new Uint8Array(req.file.buffer) // ✅ FIX HERE
+        });
+
         const pdf = await loadingTask.promise;
 
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -139,7 +142,10 @@ async function startServer() {
 
   app.post('/api/pdf-to-word', upload.single('file'), async (req, res) => {
     try {
-      const loadingTask = pdfjsLib.getDocument({ data: req.file.buffer });
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(req.file.buffer) // ✅ FIX HERE
+      });
+
       const pdf = await loadingTask.promise;
 
       let text = '';
