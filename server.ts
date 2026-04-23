@@ -8,12 +8,15 @@ import { PDFDocument } from 'pdf-lib';
 import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
 import mammoth from 'mammoth';
 import { jsPDF } from 'jspdf';
-// ✅ CORRECT pdfjs import (works with version 3.11.174)
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
 
-// ✅ Worker setup (REQUIRED)
-(pdfjsLib as any).GlobalWorkerOptions.workerSrc =
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// ✅ FIXED pdfjs import (100% working)
+import pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
+
+// ✅ Worker setup (safe)
+if (pdfjsLib && (pdfjsLib as any).GlobalWorkerOptions) {
+  (pdfjsLib as any).GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,7 +39,7 @@ const summariesHistory: any[] = [];
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -114,7 +117,6 @@ async function startServer() {
           const strings = content.items.map((item: any) => item.str);
           text += strings.join(' ') + '\n';
         }
-
       } else if (req.file.mimetype === 'text/plain') {
         text = req.file.buffer.toString('utf8');
       } else {
@@ -160,7 +162,6 @@ async function startServer() {
       const buffer = await Packer.toBuffer(doc);
 
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-      res.setHeader('Content-Disposition', 'attachment; filename=converted.docx');
       res.send(buffer);
 
     } catch (err) {
@@ -183,7 +184,6 @@ async function startServer() {
       const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'attachment; filename=converted.pdf');
       res.send(pdfBuffer);
 
     } catch (err) {
@@ -209,7 +209,6 @@ async function startServer() {
       const bytes = await merged.save();
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'attachment; filename=merged.pdf');
       res.send(Buffer.from(bytes));
 
     } catch (err) {
@@ -217,8 +216,6 @@ async function startServer() {
       res.status(500).json({ error: 'Merge failed' });
     }
   });
-
-  // ---------------- HEALTH ----------------
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
