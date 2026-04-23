@@ -9,11 +9,8 @@ import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
 import mammoth from 'mammoth';
 import { jsPDF } from 'jspdf';
 
-// ✅ FIXED pdf-parse import
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const pdfParseModule = require('pdf-parse');
-const pdfParse = pdfParseModule.default || pdfParseModule;
+// ✅ NEW: pdfjs (stable)
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -105,8 +102,16 @@ async function startServer() {
       let text = '';
 
       if (req.file.mimetype === 'application/pdf') {
-        const data = await pdfParse(req.file.buffer);
-        text = data.text;
+        const loadingTask = pdfjsLib.getDocument({ data: req.file.buffer });
+        const pdf = await loadingTask.promise;
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const strings = content.items.map((item: any) => item.str);
+          text += strings.join(' ') + '\n';
+        }
+
       } else if (req.file.mimetype === 'text/plain') {
         text = req.file.buffer.toString('utf8');
       } else {
@@ -129,8 +134,17 @@ async function startServer() {
 
   app.post('/api/pdf-to-word', upload.single('file'), async (req, res) => {
     try {
-      const data = await pdfParse(req.file.buffer);
-      const text = data.text;
+      const loadingTask = pdfjsLib.getDocument({ data: req.file.buffer });
+      const pdf = await loadingTask.promise;
+
+      let text = '';
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item: any) => item.str);
+        text += strings.join(' ') + '\n';
+      }
 
       const doc = new DocxDocument({
         sections: [{
