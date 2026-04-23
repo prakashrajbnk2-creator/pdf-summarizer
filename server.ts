@@ -8,9 +8,12 @@ import { PDFDocument } from 'pdf-lib';
 import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
 import mammoth from 'mammoth';
 import { jsPDF } from 'jspdf';
-
-// ✅ NEW: pdfjs (stable)
+// ✅ CORRECT pdfjs import (works with version 3.11.174)
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
+
+// ✅ Worker setup (REQUIRED)
+(pdfjsLib as any).GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
