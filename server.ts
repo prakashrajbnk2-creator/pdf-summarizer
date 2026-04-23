@@ -3,7 +3,6 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import pdfParse from 'pdf-parse'; // ✅ FIXED IMPORT
 import bcrypt from 'bcryptjs';
 import { PDFDocument } from 'pdf-lib';
 import { Document as DocxDocument, Packer, Paragraph, TextRun } from 'docx';
@@ -13,18 +12,21 @@ import { jsPDF } from 'jspdf';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ✅ SAFE pdf-parse setup
+let pdfParse: any;
+
 // In-memory storage
 const users: any[] = [];
 const loginHistory: any[] = [];
 const summariesHistory: any[] = [];
 
-// Bootstrap Admin
+// Admin user
 (async () => {
-  const adminHashedPassword = await bcrypt.hash('1234', 10);
+  const hashed = await bcrypt.hash('1234', 10);
   users.push({
-    name: 'Admin User',
+    name: 'Admin',
     email: 'admin@gmail.com',
-    password: adminHashedPassword,
+    password: hashed,
     role: 'admin'
   });
 })();
@@ -32,6 +34,9 @@ const summariesHistory: any[] = [];
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // ✅ dynamic import (fixes crash)
+  pdfParse = (await import('pdf-parse')).default;
 
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -47,22 +52,18 @@ async function startServer() {
       const { name, email, password } = req.body;
 
       if (!name || !email || !password) {
-        return res.status(400).json({ success: false, error: 'All fields required' });
+        return res.status(400).json({ error: 'All fields required' });
       }
 
-      const existingUser = users.find(u => u.email === email);
-      if (existingUser) {
-        return res.status(400).json({ success: false, error: 'User exists' });
+      if (users.find(u => u.email === email)) {
+        return res.status(400).json({ error: 'User exists' });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 10);
+      const hashed = await bcrypt.hash(password, 10);
+      users.push({ name, email, password: hashed, role: 'user' });
 
-      const newUser = { name, email, password: hashedPassword, role: 'user' };
-      users.push(newUser);
-
-      res.json({ success: true, user: { name, email, role: 'user' } });
-    } catch (error) {
-      console.error(error);
+      res.json({ success: true });
+    } catch {
       res.status(500).json({ error: 'Signup failed' });
     }
   });
@@ -72,20 +73,18 @@ async function startServer() {
       const { email, password } = req.body;
 
       const user = users.find(u => u.email === email);
-      if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+      if (!user) return res.status(401).json({ error: 'Invalid' });
 
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
+      const match = await bcrypt.compare(password, user.password);
+      if (!match) return res.status(401).json({ error: 'Invalid' });
 
       loginHistory.unshift({
-        email: user.email,
-        name: user.name,
-        time: new Date().toLocaleString(),
-        ip: (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress
+        email,
+        time: new Date().toLocaleString()
       });
 
-      res.json({ success: true, email: user.email, role: user.role });
-    } catch (error) {
+      res.json({ success: true, role: user.role });
+    } catch {
       res.status(500).json({ error: 'Login failed' });
     }
   });
@@ -103,28 +102,26 @@ async function startServer() {
     try {
       if (!req.file) return res.status(400).json({ error: 'No file' });
 
-      const { buffer, mimetype, originalname } = req.file;
+      let text = '';
 
-      let extractedText = '';
-
-      if (mimetype === 'application/pdf') {
-        const data = await pdfParse(buffer); // ✅ FIXED
-        extractedText = data.text;
-      } else if (mimetype === 'text/plain') {
-        extractedText = buffer.toString('utf8');
+      if (req.file.mimetype === 'application/pdf') {
+        const data = await pdfParse(req.file.buffer);
+        text = data.text;
+      } else if (req.file.mimetype === 'text/plain') {
+        text = req.file.buffer.toString('utf8');
       } else {
-        return res.status(400).json({ error: 'Unsupported file type' });
+        return res.status(400).json({ error: 'Unsupported file' });
       }
 
-      if (!extractedText.trim()) {
-        return res.status(400).json({ error: 'No text extracted' });
+      if (!text.trim()) {
+        return res.status(400).json({ error: 'Empty file' });
       }
 
-      res.json({ text: extractedText, name: originalname });
+      res.json({ text });
 
-    } catch (error) {
-      console.error('Extraction error:', error);
-      res.status(500).json({ error: 'Failed to process file' });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Processing failed' });
     }
   });
 
@@ -132,9 +129,7 @@ async function startServer() {
 
   app.post('/api/pdf-to-word', upload.single('file'), async (req, res) => {
     try {
-      if (!req.file) return res.status(400).json({ error: 'Upload PDF' });
-
-      const data = await pdfParse(req.file.buffer); // ✅ FIXED
+      const data = await pdfParse(req.file.buffer);
       const text = data.text;
 
       const doc = new DocxDocument({
@@ -148,22 +143,54 @@ async function startServer() {
       const buffer = await Packer.toBuffer(doc);
 
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-      res.setHeader('Content-Disposition', `attachment; filename=file.docx`);
       res.send(buffer);
 
-    } catch (error) {
-      console.error(error);
+    } catch {
       res.status(500).json({ error: 'Conversion failed' });
     }
   });
 
-  // ---------------- HEALTH ----------------
+  // ---------------- WORD → PDF ----------------
+
+  app.post('/api/word-to-pdf', upload.single('file'), async (req, res) => {
+    try {
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+      const text = result.value;
+
+      const doc = new jsPDF();
+      doc.text(text, 10, 10);
+
+      res.send(Buffer.from(doc.output('arraybuffer')));
+    } catch {
+      res.status(500).json({ error: 'Conversion failed' });
+    }
+  });
+
+  // ---------------- MERGE ----------------
+
+  app.post('/api/merge-pdfs', upload.array('files'), async (req, res) => {
+    try {
+      const merged = await PDFDocument.create();
+
+      for (const file of req.files as Express.Multer.File[]) {
+        const pdf = await PDFDocument.load(file.buffer);
+        const pages = await merged.copyPages(pdf, pdf.getPageIndices());
+        pages.forEach(p => merged.addPage(p));
+      }
+
+      const bytes = await merged.save();
+      res.send(Buffer.from(bytes));
+
+    } catch {
+      res.status(500).json({ error: 'Merge failed' });
+    }
+  });
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
   });
 
-  // ---------------- VITE ----------------
+  // ---------------- FRONTEND ----------------
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
